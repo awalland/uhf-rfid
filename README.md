@@ -1,3 +1,4 @@
+[![Rust](https://github.com/awalland/uhf-rfid/actions/workflows/rust.yml/badge.svg)](https://github.com/awalland/uhf-rfid/actions/workflows/rust.yml)
 [![codecov](https://codecov.io/github/awalland/uhf-rfid/graph/badge.svg?token=FSE4ZYPOIE)](https://codecov.io/github/awalland/uhf-rfid)
 
 # uhf-rfid
