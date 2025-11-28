@@ -31,6 +31,8 @@ uhf-rfid = { version = "0.1", features = ["uart-esp32"] }
 
 ## Usage
 
+### Desktop (Serial Port)
+
 ```rust
 use uhf_rfid::{UhfRfid, SerialTransport};
 
@@ -51,6 +53,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tags = rfid.multiple_poll(100)?;
     for tag in tags {
         println!("Tag: {}", tag.epc);
+    }
+
+    Ok(())
+}
+```
+
+### ESP32 (UART)
+
+```rust
+use esp_idf_svc::hal::peripherals::Peripherals;
+use uhf_rfid::{UhfRfid, UartTransport};
+
+fn main() -> anyhow::Result<()> {
+    esp_idf_svc::sys::link_patches();
+
+    let peripherals = Peripherals::take()?;
+
+    let transport = UartTransport::new(
+        peripherals.uart1,
+        peripherals.pins.gpio17, // TX
+        peripherals.pins.gpio16, // RX
+        115200,
+    )?;
+
+    let mut rfid = UhfRfid::new(transport);
+
+    // Get firmware version
+    let version = rfid.get_firmware_version()?;
+    println!("Firmware: {}", version);
+
+    // Poll for tags
+    if let Some(tag) = rfid.single_poll()? {
+        println!("Found tag: {} (RSSI: {})", tag.epc, tag.rssi);
     }
 
     Ok(())
