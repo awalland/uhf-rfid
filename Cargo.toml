@@ -1,0 +1,20 @@
+[package]
+name = "uhf-rfid"
+version = "0.1.0"
+edition = "2024"
+description = "Driver for M5Stack UHF RFID reader with support for multiple transport backends"
+license = "WTFPL"
+repository = "https://github.com/awalland/uhf-rfid"
+keywords = ["m5stack", "rfid", "uhf", "esp32", "serial"]
+categories = ["embedded", "hardware-support"]
+
+[features]
+default = []
+uart-esp32 = ["esp-idf-svc", "esp-idf-hal"]
+serial = ["serialport"]
+
+[dependencies]
+log = "0.4"
+esp-idf-svc = { version = "0.51", optional = true }
+esp-idf-hal = { version = "0.45", optional = true }
+serialport = { version = "4", optional = true }
