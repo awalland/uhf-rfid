@@ -1,3 +1,5 @@
+[![codecov](https://codecov.io/github/awalland/uhf-rfid/graph/badge.svg?token=FSE4ZYPOIE)](https://codecov.io/github/awalland/uhf-rfid)
+
 # uhf-rfid
 
 A Rust driver for M5Stack UHF RFID readers with support for multiple transport backends.
