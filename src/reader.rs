@@ -29,8 +29,6 @@ impl<T: RfidTransport> UhfRfid<T> {
     const SET_SELECT_MODE: u8 = 0x12;
     const GET_TX_POWER: u8 = 0xB7;
     const SET_TX_POWER: u8 = 0xB6;
-
-    // Phase 2: Configuration commands
     const SET_REGION: u8 = 0x07;
     const GET_REGION: u8 = 0x08;
     const GET_QUERY_PARAM: u8 = 0x0D;
@@ -41,14 +39,10 @@ impl<T: RfidTransport> UhfRfid<T> {
     const SET_CHANNEL: u8 = 0xAB;
     const SET_AUTO_FREQ_HOP: u8 = 0xAD;
     const SET_CONTINUOUS_CARRIER: u8 = 0xB0;
-
-    // Phase 3: Tag Memory Operations
     const READ_TAG_DATA: u8 = 0x39;
     const WRITE_TAG_DATA: u8 = 0x49;
     const LOCK_TAG: u8 = 0x82;
     const KILL_TAG: u8 = 0x65;
-
-    // Phase 4: Advanced/Vendor commands
     const INVENTORY_BUFFER: u8 = 0x18;
     const GET_BUFFER_DATA: u8 = 0x29;
     const CLEAR_BUFFER: u8 = 0x2A;
