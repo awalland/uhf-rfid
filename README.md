@@ -58,6 +58,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Tag: {}", tag.epc);
     }
 
+    // Poll with callback for real-time processing
+    let count = rfid.multiple_poll_with_callback(100, |tag| {
+        println!("Discovered tag: {} (RSSI: {})", tag.epc, tag.rssi);
+    })?;
+    println!("Total tags found: {}", count);
+
     Ok(())
 }
 ```
