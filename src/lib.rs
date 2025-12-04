@@ -342,6 +342,150 @@ mod tests {
     }
 
     // ===================
+    // poll_for_duration tests
+    // ===================
+
+    /// Mock transport that returns multiple responses in sequence for poll_for_duration tests
+    struct MultiResponseMockTransport {
+        responses: RefCell<Vec<Vec<u8>>>,
+        read_count: RefCell<usize>,
+    }
+
+    impl MultiResponseMockTransport {
+        fn new(responses: Vec<Vec<u8>>) -> Self {
+            Self {
+                responses: RefCell::new(responses),
+                read_count: RefCell::new(0),
+            }
+        }
+    }
+
+    impl RfidTransport for MultiResponseMockTransport {
+        type Error = std::io::Error;
+
+        fn write(&mut self, data: &[u8]) -> Result<usize, Self::Error> {
+            Ok(data.len())
+        }
+
+        fn read(&mut self, buf: &mut [u8], _timeout_ms: u32) -> Result<usize, Self::Error> {
+            let responses = self.responses.borrow();
+            let mut count = self.read_count.borrow_mut();
+
+            if *count >= responses.len() {
+                return Ok(0);
+            }
+
+            let response = &responses[*count];
+            let len = response.len().min(buf.len());
+            buf[..len].copy_from_slice(&response[..len]);
+            *count += 1;
+            Ok(len)
+        }
+
+        fn clear_input(&mut self) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_create_poll_for_duration_command() {
+        // poll_for_duration uses 0xFFFF count for continuous polling
+        let result = UhfRfid::<DummyTransport>::create_command(0x27, &[0x22, 0xFF, 0xFF]);
+        assert_eq!(result[0], 0xBB);
+        assert_eq!(result[2], 0x27); // MULTIPLE_POLL command
+        assert_eq!(result[5], 0x22);
+        assert_eq!(result[6], 0xFF); // count MSB
+        assert_eq!(result[7], 0xFF); // count LSB
+        assert_eq!(*result.last().unwrap(), 0x7E);
+    }
+
+    #[test]
+    fn test_poll_for_duration_with_tags() {
+        use std::time::Duration;
+
+        // Simulate two tag responses followed by empty reads
+        let tag1_response = vec![
+            0xBB, 0x02, 0x22, 0x00, 0x11, // header
+            0xC8, // RSSI = 200
+            0x30, 0x00, // PC
+            0xE2, 0x00, 0x00, 0x17, 0x22, 0x09, 0x01, 0x23, 0x19, 0x10, 0x01, 0x23, // EPC
+            0x00, 0x7E, // checksum, end
+        ];
+        let tag2_response = vec![
+            0xBB, 0x02, 0x22, 0x00, 0x11,
+            0xB4, // RSSI = 180
+            0x30, 0x00,
+            0xE2, 0x00, 0x00, 0x17, 0x22, 0x09, 0x01, 0x23, 0x19, 0x10, 0x01, 0x24, // Different EPC
+            0x00, 0x7E,
+        ];
+
+        let transport = MultiResponseMockTransport::new(vec![tag1_response, tag2_response]);
+        let mut rfid = UhfRfid::new(transport);
+
+        // Use a very short timeout since we're mocking
+        let tags = rfid.poll_for_duration(Duration::from_millis(50)).unwrap();
+
+        assert_eq!(tags.len(), 2);
+        assert_eq!(tags[0].rssi, 0xC8);
+        assert_eq!(tags[1].rssi, 0xB4);
+    }
+
+    #[test]
+    fn test_poll_for_duration_with_callback() {
+        use std::time::Duration;
+
+        let tag_response = vec![
+            0xBB, 0x02, 0x22, 0x00, 0x11,
+            0xC8,
+            0x30, 0x00,
+            0xE2, 0x00, 0x00, 0x17, 0x22, 0x09, 0x01, 0x23, 0x19, 0x10, 0x01, 0x23,
+            0x00, 0x7E,
+        ];
+
+        let transport = MultiResponseMockTransport::new(vec![tag_response]);
+        let mut rfid = UhfRfid::new(transport);
+
+        let mut callback_count = 0;
+        let count = rfid
+            .poll_for_duration_with_callback(Duration::from_millis(50), |_tag| {
+                callback_count += 1;
+            })
+            .unwrap();
+
+        assert_eq!(count, 1);
+        assert_eq!(callback_count, 1);
+    }
+
+    #[test]
+    fn test_poll_for_duration_empty() {
+        use std::time::Duration;
+
+        // No tags found
+        let transport = MultiResponseMockTransport::new(vec![]);
+        let mut rfid = UhfRfid::new(transport);
+
+        let tags = rfid.poll_for_duration(Duration::from_millis(50)).unwrap();
+        assert!(tags.is_empty());
+    }
+
+    #[test]
+    fn test_poll_for_duration_early_termination() {
+        use std::time::Duration;
+
+        // End-of-poll notification (0xFF command with 0x15 status)
+        let end_notification = vec![
+            0xBB, 0x01, 0xFF, 0x00, 0x01, 0x15, 0x00, 0x7E,
+        ];
+
+        let transport = MultiResponseMockTransport::new(vec![end_notification]);
+        let mut rfid = UhfRfid::new(transport);
+
+        let tags = rfid.poll_for_duration(Duration::from_secs(10)).unwrap();
+        // Should return early due to end notification, not wait full 10 seconds
+        assert!(tags.is_empty());
+    }
+
+    // ===================
     // bytes_to_hex tests
     // ===================
 

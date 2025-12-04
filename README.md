@@ -52,13 +52,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Found tag: {} (RSSI: {})", tag.epc, tag.rssi);
     }
 
-    // Poll for multiple tags
+    // Poll for multiple tags (100 inventory rounds)
     let tags = rfid.multiple_poll(100)?;
     for tag in tags {
         println!("Tag: {}", tag.epc);
     }
 
-    // Poll with callback for real-time processing
+    // Poll with callback for real-time processing (100 inventory rounds)
     let count = rfid.multiple_poll_with_callback(100, |tag| {
         println!("Discovered tag: {} (RSSI: {})", tag.epc, tag.rssi);
     })?;

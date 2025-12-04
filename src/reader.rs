@@ -76,16 +76,23 @@ impl<T: RfidTransport> UhfRfid<T> {
     }
 
     /// Poll for multiple RFID tags with a callback for each tag
-    pub fn multiple_poll_with_callback<F>(&mut self, count: u16, mut callback: F) -> Result<usize, UhfError>
+    ///
+    /// # Arguments
+    /// * `rounds` - Number of inventory rounds to perform (not the number of tags to find)
+    /// * `callback` - Function called for each discovered tag
+    ///
+    /// # Returns
+    /// Total number of tags discovered across all rounds
+    pub fn multiple_poll_with_callback<F>(&mut self, rounds: u16, mut callback: F) -> Result<usize, UhfError>
     where
         F: FnMut(TagInfo),
     {
-        if count == 0 {
-            return Err(UhfError::InvalidParameter("Poll count must be at least 1".into()));
+        if rounds == 0 {
+            return Err(UhfError::InvalidParameter("Poll rounds must be at least 1".into()));
         }
 
-        let count_msb = (count >> 8) as u8;
-        let count_lsb = (count & 0xFF) as u8;
+        let rounds_msb = (rounds >> 8) as u8;
+        let rounds_lsb = (rounds & 0xFF) as u8;
 
         self.transport
             .clear_input()
@@ -93,7 +100,7 @@ impl<T: RfidTransport> UhfRfid<T> {
         self.transport
             .write(&Self::create_command(
                 Self::MULTIPLE_POLL,
-                &[0x22, count_msb, count_lsb],
+                &[0x22, rounds_msb, rounds_lsb],
             ))
             .map_err(|e| UhfError::Transport(format!("{:?}", e)))?;
         std::thread::sleep(Duration::from_millis(100));
@@ -159,10 +166,127 @@ impl<T: RfidTransport> UhfRfid<T> {
     }
 
     /// Poll for multiple RFID tags
-    pub fn multiple_poll(&mut self, count: u16) -> Result<Vec<TagInfo>, UhfError> {
+    ///
+    /// # Arguments
+    /// * `rounds` - Number of inventory rounds to perform (not the number of tags to find)
+    ///
+    /// # Returns
+    /// Vector of all tags discovered across all rounds
+    pub fn multiple_poll(&mut self, rounds: u16) -> Result<Vec<TagInfo>, UhfError> {
         let mut tags = Vec::new();
-        self.multiple_poll_with_callback(count, |tag| tags.push(tag))?;
+        self.multiple_poll_with_callback(rounds, |tag| tags.push(tag))?;
         Ok(tags)
+    }
+
+    /// Poll for RFID tags for a specified duration
+    ///
+    /// This starts continuous polling (0xFFFF rounds) and collects tags until
+    /// the timeout expires, then stops polling.
+    ///
+    /// # Arguments
+    /// * `timeout` - How long to poll for tags
+    ///
+    /// # Returns
+    /// Vector of all tags discovered during the timeout period
+    pub fn poll_for_duration(&mut self, timeout: Duration) -> Result<Vec<TagInfo>, UhfError> {
+        let mut tags = Vec::new();
+        self.poll_for_duration_with_callback(timeout, |tag| tags.push(tag))?;
+        Ok(tags)
+    }
+
+    /// Poll for RFID tags for a specified duration with a callback
+    ///
+    /// This starts continuous polling (0xFFFF rounds) and calls the callback
+    /// for each tag discovered until the timeout expires, then stops polling.
+    ///
+    /// # Arguments
+    /// * `timeout` - How long to poll for tags
+    /// * `callback` - Function called for each discovered tag
+    ///
+    /// # Returns
+    /// Total number of tags discovered
+    pub fn poll_for_duration_with_callback<F>(
+        &mut self,
+        timeout: Duration,
+        mut callback: F,
+    ) -> Result<usize, UhfError>
+    where
+        F: FnMut(TagInfo),
+    {
+        // Start continuous polling with max count
+        self.transport
+            .clear_input()
+            .map_err(|e| UhfError::Transport(format!("{:?}", e)))?;
+        self.transport
+            .write(&Self::create_command(
+                Self::MULTIPLE_POLL,
+                &[0x22, 0xFF, 0xFF], // 0xFFFF = 65535 rounds (continuous)
+            ))
+            .map_err(|e| UhfError::Transport(format!("{:?}", e)))?;
+
+        let mut tag_count = 0;
+        let start = Instant::now();
+        let mut buffer = Vec::new();
+
+        // Read tags until timeout
+        while start.elapsed() < timeout {
+            let mut temp_buf = [0u8; 256];
+
+            match self.transport.read(&mut temp_buf, 50) {
+                Ok(bytes_read) if bytes_read > 0 => {
+                    buffer.extend_from_slice(&temp_buf[..bytes_read]);
+
+                    while let Some(frame_end) = buffer.iter().position(|&b| b == Self::END) {
+                        if let Some(frame_start) =
+                            buffer[..frame_end].iter().rposition(|&b| b == Self::HEADER)
+                        {
+                            let frame = &buffer[frame_start..=frame_end];
+
+                            // Check for end-of-poll notification
+                            if frame.len() >= 8
+                                && frame[1] == Self::RESP_TYPE_NOTIFICATION
+                                && frame[2] == 0xFF
+                                && frame[5] == 0x15
+                            {
+                                buffer.drain(..=frame_end);
+                                return Ok(tag_count);
+                            }
+
+                            match Self::parse_tag(frame) {
+                                Ok(Some(tag)) => {
+                                    callback(tag);
+                                    tag_count += 1;
+                                }
+                                Ok(None) => {}
+                                Err(e) => {
+                                    warn!("Failed to parse frame: {:?}", e);
+                                }
+                            }
+
+                            buffer.drain(..=frame_end);
+                        } else {
+                            buffer.drain(..=frame_end);
+                        }
+                    }
+                }
+                Ok(_) => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(_) => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+        }
+
+        // Stop polling
+        let _ = self.transport.write(&Self::create_command(Self::STOP_MULTIPLE_POLL, &[]));
+
+        // Drain any remaining responses
+        std::thread::sleep(Duration::from_millis(100));
+        let mut drain_buf = [0u8; 256];
+        while self.transport.read(&mut drain_buf, 50).unwrap_or(0) > 0 {}
+
+        Ok(tag_count)
     }
 
     /// Get current transmit power in dBm
@@ -796,20 +920,20 @@ impl<T: RfidTransport> UhfRfid<T> {
     /// `clear_buffer()` to clear the buffer.
     ///
     /// # Arguments
-    /// * `count` - Number of inventory rounds to perform
-    pub fn inventory_buffer(&mut self, count: u16) -> Result<(), UhfError> {
-        if count == 0 {
+    /// * `rounds` - Number of inventory rounds to perform
+    pub fn inventory_buffer(&mut self, rounds: u16) -> Result<(), UhfError> {
+        if rounds == 0 {
             return Err(UhfError::InvalidParameter(
-                "Inventory count must be at least 1".into(),
+                "Inventory rounds must be at least 1".into(),
             ));
         }
 
-        let count_msb = (count >> 8) as u8;
-        let count_lsb = (count & 0xFF) as u8;
+        let rounds_msb = (rounds >> 8) as u8;
+        let rounds_lsb = (rounds & 0xFF) as u8;
 
         let response = self.exec(&Self::create_command(
             Self::INVENTORY_BUFFER,
-            &[0x22, count_msb, count_lsb],
+            &[0x22, rounds_msb, rounds_lsb],
         ))?;
 
         if response.len() >= 7
