@@ -242,14 +242,21 @@ impl<T: RfidTransport> UhfRfid<T> {
                         {
                             let frame = &buffer[frame_start..=frame_end];
 
-                            // Check for end-of-poll notification
+                            // Check for end-of-poll notification - restart polling
                             if frame.len() >= 8
                                 && frame[1] == Self::RESP_TYPE_NOTIFICATION
                                 && frame[2] == 0xFF
                                 && frame[5] == 0x15
                             {
                                 buffer.drain(..=frame_end);
-                                return Ok(tag_count);
+                                // Restart polling if we still have time
+                                if start.elapsed() < timeout {
+                                    let _ = self.transport.write(&Self::create_command(
+                                        Self::MULTIPLE_POLL,
+                                        &[0x22, 0xFF, 0xFF],
+                                    ));
+                                }
+                                continue;
                             }
 
                             match Self::parse_tag(frame) {

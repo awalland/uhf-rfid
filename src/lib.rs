@@ -469,20 +469,27 @@ mod tests {
     }
 
     #[test]
-    fn test_poll_for_duration_early_termination() {
+    fn test_poll_for_duration_restarts_on_end_notification() {
         use std::time::Duration;
 
-        // End-of-poll notification (0xFF command with 0x15 status)
+        // End-of-poll notification followed by a tag (simulating restart)
         let end_notification = vec![
             0xBB, 0x01, 0xFF, 0x00, 0x01, 0x15, 0x00, 0x7E,
         ];
+        let tag_response = vec![
+            0xBB, 0x02, 0x22, 0x00, 0x11,
+            0xC8,
+            0x30, 0x00,
+            0xE2, 0x00, 0x00, 0x17, 0x22, 0x09, 0x01, 0x23, 0x19, 0x10, 0x01, 0x23,
+            0x00, 0x7E,
+        ];
 
-        let transport = MultiResponseMockTransport::new(vec![end_notification]);
+        let transport = MultiResponseMockTransport::new(vec![end_notification, tag_response]);
         let mut rfid = UhfRfid::new(transport);
 
-        let tags = rfid.poll_for_duration(Duration::from_secs(10)).unwrap();
-        // Should return early due to end notification, not wait full 10 seconds
-        assert!(tags.is_empty());
+        // Should continue polling after end notification and find the tag
+        let tags = rfid.poll_for_duration(Duration::from_millis(50)).unwrap();
+        assert_eq!(tags.len(), 1);
     }
 
     // ===================
